@@ -1,5 +1,6 @@
 clear;
 clc; clf;
+
 % Nonlilear boundary problem
 % second order
 % y'' = f(x,y,y') x at [xL,xR]
@@ -14,108 +15,205 @@ clc; clf;
 
 
 %% input parameters
+
 xL = 0;
 xR = 10;
-cL = 0;
-cR = tanh(10);
-scope = 3;
-eps = 1e-4;
+yL = 0;
+yR = tanh(10);
 
-%% Coarest mesh
+
+%% Base mesh and init 
+
 M = 128;
 h = (xR - xL)/(M - 1.5);
 
-alpha = 0.5;
-x = linspace(xL-h/2,xR,M);
-yinit = (1-alpha)*tanh(x) + alpha * tanh(10) * x/10;
-y = yinit;
+% eps = 1e-4;
+% max 
+% alpha = 1.78;
+% min
+% alpha = -8.53;
+
+alpha = 1;
+xbase = linspace(xL-h/2,xR,M);
+yinit = (1-alpha)*tanh(xbase) + alpha * tanh(10) * xbase/10;
+ybase = yinit;
+
+eps = 1e-4;
+scope = 2;
+MaxNewtonsIter = 100;
+MaxMeshPoints = M * scope^8;
+
+%% create subplot's handles
+
+mainPlot = subplot(2,3,[2,3,5,6]);
+correctionPlot = subplot(2,3,1);
+convergencePlot = subplot(2,3,4);
+
+hold(mainPlot,'on');
+hold(correctionPlot,'on');
+hold(convergencePlot,'on');
 
 %% display first plot
-subplot(2,3,[2,3,5,6])
-plot(x,yinit,'LineWidth',1, 'Color','R')
-hold on
-plot(x,tanh(x),'LineWidth',1,'Color','G')
-hold off
 
-xlabel("x");
-ylabel("y");
-ylim([0.0 1.1])
-xlim([0.0 10.0])
-title("Solution Initialization");
-legend("y_{init}", "y_{analytic}", 'Location','southeast')
+subplot(mainPlot);
+plot(xbase,yinit,'LineWidth',2, 'Color','C')
 
-%% init deltas
-accuracy = 1;
+plot(xbase,tanh(xbase),'LineWidth',2,'Color','B')
+plot([xL,xR], [yL,yR], 'ob');
+
+xlabel('x');
+ylabel('y');
+xlim([xL xR])
+title('Solution Initialization');
+legend('y_{init}', 'y_{analytic}', 'Boundary conditions', 'Location','southeast')
+
+%% print headlines
+
+fprintf('alpha = %f eps = %.1e\nxL = %f xR = %f\nyL = %f yR = %f\n', alpha, eps, xL, xR, yL, yR);
+fprintf('Max Newtonian iterations = %d\n',MaxNewtonsIter);
+fprintf('Max mesh points = %d\n',MaxMeshPoints);
+fprintf('Start solve\n');
+fprintf('|------|------|--------|----------|----------|-----------|\n');
+fprintf('| iter | mesh | points |  delta   |  eps/2   |   ratio   |\n');
+fprintf('|------|------|--------|----------|----------|-----------|\n');
+
+%% prepare to loop
+
+normv = 1;
 iter = 1;
-while accuracy > eps
+isSucessFindIter = true;
+isSucessFindFunc = true;
+
+tStart=tic;
+while normv > eps/2
     %% init locals to internal loop - find v - Newtonian correction
-    Mv = M; hv = h; xv = x; yv = y;
+
+    Mfine = M; hcoarse = h; xcoarse = xbase; ycoarse = ybase;
     mesh_num = 1;
+    if iter > MaxNewtonsIter
+        isSucessFindFunc = false;
+        break
+    end % if
 
     %% first solve
-    v = findCorrection(xv,yv,Mv,hv);
-    delta = norm(v,"inf");
+
+    vbase = findCorrection(xbase,ybase,M,h, yL);
+    vcoarse = vbase;
+    delta = norm(vbase,'inf');
+    
+    
+    cla(correctionPlot);
     while delta > eps/2
         %% transform to fine mesh
-        hv = hv/scope;
-        Mv = (Mv - 1) * scope;
+        Mfine = Mfine * scope;
+        hfine = (xR - xL)/(Mfine - 1.5);
 
-        xfine = linspace(xL-hv/2,xR,Mv);
-        yfine = Lagrange(xv,yv,xfine,3);
-        vprev = Lagrange(xv,v,xfine,3);
+        if Mfine > MaxMeshPoints
+            isSucessFindIter = false;
+            break
+        end % if
+
+        xfine = linspace(xL-hfine/2,xR,Mfine);
+        yfine = Lagrange(xcoarse,ycoarse,xfine,4);
+        vcoarse2fine = Lagrange(xcoarse,vcoarse,xfine,4);
         
         %% find new correction
-        v = findCorrection(xfine,yfine,Mv,hv);
-        xv = xfine;
-        yv = yfine;
         
+        vfine = findCorrection(xfine,yfine,Mfine,hfine, yL);
         deltaprev = delta;
-        delta = norm(vprev-v,"inf");
+        
+        delta = norm(vcoarse2fine-vfine,'inf');
         reldelta = deltaprev / delta;
 
-        %% display plot
-        hold on
-        subplot(2,3,1)
-        plot(xv,v);
-        hold off
-        xlim([0.0 10.0])
-        xlabel("x");
-        ylabel("v");
-        title(sprintf("Newton iteration %d mesh = %d M = %5d\nerr = %5.2e order = %f", iter, mesh_num, Mv, delta, reldelta));
-        drawnow
+        %% display plot and print info
+        subplot(correctionPlot)
+        
+        plot(xfine,vfine,'DisplayName',[[['mesh ' num2str(mesh_num)] ', M = '] num2str(Mfine)]);
+        legend()
 
-        %% print info
-        fprintf("iter = %d  mesh_num = %d   M = %5d  ", iter, mesh_num, Mv);
-        fprintf("err = %5.2e  required accuracy = %5.2e   order = %f\n", delta, eps/2,reldelta);
+        xlim([0.0 10.0])
+        xlabel('x');
+        ylabel('v');
+        title(texlabel(sprintf('Newton iteration %d, mesh = %d, M = %5d\n delta_{%d} = %5.2e\n delta_{%d}/delta_{%d} = %f', iter, mesh_num, Mfine, mesh_num, delta,mesh_num,mesh_num-1, reldelta)));
+        drawnow
+        
+        if mesh_num == 1
+            fprintf('| %4d | %4d | %6d | %5.2e | %5.2e |   -----   |\n', iter, mesh_num, Mfine, delta, eps/2);
+        else
+            fprintf('| %4d | %4d | %6d | %5.2e | %5.2e | %9.4f |\n', iter, mesh_num, Mfine, delta, eps/2, reldelta);
+        end
+        xcoarse = xfine;
+        ycoarse = yfine;
+        vcoarse = vfine;
+        Mcoarse = Mfine;
+        hcoarse = hfine;
         mesh_num = mesh_num + 1;
     end %while
+
     %% interpolate correction and change solution
-    v_coarse = Lagrange(xfine,v,x,3);
-    y = y + v_coarse;
-    accuracy = norm(v_coarse,"inf");
 
-    %% display plots
+    vfine2base = Lagrange(xfine,vfine,xbase,4);
+    ybase = ybase + vfine2base;
+    normv = norm(vfine,'inf');
+
+    %% display plots and print info
+    
     % main plot
-    hold on
-    subplot(2,3,[2,3,5,6])
-    plot(x,y,'DisplayName',['y_' num2str(iter)]);
-    hold off
-
-    title(sprintf("Newton iteration %d, ||v|| = %f",iter,accuracy));
+    subplot(mainPlot)
+    plot(xbase,ybase,'DisplayName',[['y_{' num2str(iter)] '}']);
+    title(sprintf('Current approximate\nNewton iteration %d, ||v|| = %4.2e',iter,normv));
     
     % Convergence plot
-    hold on
-    subplot(2,3,4)
-    plot(iter,log10(accuracy),'Marker','o', 'Color','red');
-    hold off
+    subplot(convergencePlot)
+    plot(iter,log10(normv),'Marker','o', 'Color','B', 'DisplayName','||v||');
+    
+    
+    xlabel('Iteration number');
+    ylabel('log_{10}(||v||)');
+    title(sprintf('Convergence of Newtonian iterations, iteration %d',iter));
 
-    xlabel("iteration");
-    ylabel("log_{10}(||v||)");
-    title(sprintf("Convergence of Newtonian iterations, iteration %d",iter));
     drawnow
 
-    %% print info
-    fprintf("For Newtonian iteration %2d norm of residual ||v|| = %6.4e  \n", iter, accuracy);
+    if(isSucessFindIter)
+        fprintf('| %4d |-------------------------------------------------|\n', iter);
+        fprintf('| %4d | Find Newtonian iteration - success              |\n', iter);
+        fprintf('| %4d | ||v|| = %4.2e   eps/2 = %5.2e             |\n', iter, normv, eps/2);
+        fprintf('|------|------|--------|----------|----------|-----------|\n');
+    else
+        fprintf('| %4d |--------------------------------------------------\n', iter);
+        fprintf('| %4d | Find Newtonian iteration - unsuccess            |\n', iter);
+        fprintf('| %4d | Point limit exceeded                            |\n', iter);
+        fprintf('| %4d | Maximum = %5d, current = %5d                |\n', iter, MaxMeshPoints, Mfine);
+        fprintf('| %4d | ||v|| = %4.2e   eps/2 = %5.2e             |\n', iter, normv, eps/2);
+        fprintf('|------|------|--------|----------|----------|-----------|\n');
+        break;
+    end %if
+    
     iter = iter + 1;
 end % for
-fprintf("Newtonian iterations have SUCESSFULLY finished for alpha = %f \n", alpha);
+tElapsed=toc(tStart);
+
+if(isSucessFindFunc && isSucessFindIter)
+    subplot(mainPlot)
+    plot(xbase,ybase,'LineWidth',2,'Color','G','DisplayName','y_{result}');
+    subplot(convergencePlot)
+    plot(iter,log10(normv),'Marker','o', 'Color','G', 'DisplayName','||v||');
+    
+    fprintf('Solve finished SUCESSFULLY, time = %f\n', tElapsed);
+else
+    subplot(mainPlot)
+    plot(xbase,ybase,'LineWidth',2,'Color','R','DisplayName','y_{result}');
+    subplot(convergencePlot)
+    plot(iter,log10(normv),'Marker','o', 'Color','R', 'DisplayName','||v||');
+    
+    
+    fprintf('Solve finished UNSUCESSFULLY, time = %f\n', tElapsed);
+    if(isSucessFindIter)
+        fprintf('Exceeded limit of Newtonian iterations\n');
+    end
+    
+end % if
+
+hold(mainPlot,'off');
+hold(correctionPlot,'off');
+hold(convergencePlot,'off');

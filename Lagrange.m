@@ -1,5 +1,4 @@
 function [y_dst] = Lagrange(x_scr,y_scr,x_dst, pointcount)
-
 % let's assume both sects are regular
 % and x_coarse(1) < x_fine(1)
 h_dst = x_dst(2) -x_dst(1);
@@ -9,7 +8,7 @@ if h_dst > h_scr
     rel = round(h_dst/h_scr);
     scheme = 0:pointcount-1;
     shift = round(rel/2);
-    cond = 2:length(x_dst);
+    cond = 1:length(x_dst);
 else
     % from coarse mesh to fine
     scheme = 1:pointcount;
@@ -22,7 +21,7 @@ y_dst = zeros(1,length(x_dst));
 
 for m = cond
     if h_dst > h_scr
-        if m~=2 && shift + rel < length(x_scr)
+        if m~=1 && shift + rel < length(x_scr)
             shift = shift + rel;    
         end
         if shift + rel > length(x_scr)
